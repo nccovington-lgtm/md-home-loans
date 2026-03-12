@@ -53,11 +53,13 @@ export default function LeadForm() {
           real_estate_agent: data.real_estate_agent || "Not specified",
           message: data.message || "",
         },
-        process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY!
+        { publicKey: process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY! }
       );
       setStatus("success");
       form.reset();
-    } catch {
+    } catch (err: unknown) {
+      const e = err as { text?: string; status?: number; message?: string };
+      console.error("EmailJS error — status:", e?.status, "text:", e?.text, "message:", e?.message, "raw:", err);
       setStatus("error");
     }
   }
