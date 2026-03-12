@@ -34,7 +34,7 @@ export default function Navbar() {
               </div>
               <div className="flex flex-col leading-none">
                 <span className="section-label text-teal">Powered By</span>
-                <span className={`font-bold text-base md:text-lg tracking-tight transition-colors duration-300 ${scrolled ? "text-navy" : "text-white"}`}>
+                <span className={`font-bold text-sm md:text-lg tracking-tight whitespace-nowrap transition-colors duration-300 ${scrolled ? "text-navy" : "text-white"}`}>
                   Best Suited Mortgage
                 </span>
               </div>
@@ -43,7 +43,7 @@ export default function Navbar() {
             {/* CTA */}
             <a
               href="#contact"
-              className="bg-teal hover:bg-teal-light text-white font-semibold px-5 py-2.5 text-xs tracking-widest uppercase transition-all duration-200 hover:shadow-md"
+              className="bg-teal hover:bg-teal-light text-white font-semibold px-3 py-2 sm:px-5 sm:py-2.5 text-xs tracking-widest uppercase whitespace-nowrap transition-all duration-200 hover:shadow-md flex-shrink-0"
               style={{ borderRadius: "3px" }}
             >
               Get Pre-Approved
