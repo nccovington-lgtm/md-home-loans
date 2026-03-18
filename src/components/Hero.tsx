@@ -58,11 +58,11 @@ export default function Hero() {
         {/* CTAs */}
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <a
-            href="#contact"
+            href="/pricing"
             className="bg-teal hover:bg-teal-light text-white font-semibold px-8 py-3.5 text-xs tracking-widest uppercase transition-all duration-200 hover:shadow-lg"
             style={{ borderRadius: "3px" }}
           >
-            See If I Qualify
+            Check My Rate
           </a>
           <a
             href="#why-different"
