@@ -140,7 +140,7 @@ export default function PricingCalculator() {
       <div className="fixed top-0 left-0 right-0 h-1 bg-teal z-50" />
 
       {/* Navbar */}
-      <nav className={`fixed top-1 left-0 right-0 z-40 bg-white/97 backdrop-blur-md shadow-sm border-b border-border transition-transform duration-300 ${navVisible ? "translate-y-0" : "-translate-y-full"}`}>
+      <nav className={`fixed top-1 left-0 right-0 z-40 bg-navy border-b border-white/10 transition-transform duration-300 ${navVisible ? "translate-y-0" : "-translate-y-full"}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <a href="/" className="flex items-center gap-2.5">
@@ -152,7 +152,7 @@ export default function PricingCalculator() {
               </div>
               <div className="flex flex-col leading-none">
                 <span className="section-label text-teal">Powered By</span>
-                <span className="font-bold text-sm md:text-lg tracking-tight whitespace-nowrap text-navy">
+                <span className="font-bold text-sm md:text-lg tracking-tight whitespace-nowrap text-white">
                   Best Suited Mortgage
                 </span>
               </div>
@@ -177,9 +177,9 @@ export default function PricingCalculator() {
             <h1 className="font-serif text-3xl sm:text-4xl text-white mb-5">
               Rate & Payment Estimator
             </h1>
-            <div className="inline-flex items-center gap-2 bg-gold/10 border border-gold/30 px-4 py-2" style={{ borderRadius: "3px" }}>
+            <div className="inline-flex flex-wrap items-center justify-center gap-2 bg-gold/10 border border-gold/30 px-4 py-2 max-w-full" style={{ borderRadius: "3px" }}>
               <div className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse flex-shrink-0" />
-              <span className="text-gold text-xs font-semibold tracking-wide uppercase">
+              <span className="text-gold text-xs font-semibold tracking-wide uppercase text-center">
                 Rates as of {lastUpdated} · Subject to change daily
               </span>
             </div>
@@ -293,11 +293,11 @@ export default function PricingCalculator() {
                   <p className="section-label text-teal mb-4">Your Estimated Rate</p>
 
                   <div className="flex items-baseline gap-2 mb-1">
-                    <span className="font-serif text-5xl sm:text-6xl text-white leading-none tabular-nums">
+                    <span className="font-serif text-4xl sm:text-5xl lg:text-6xl text-white leading-none tabular-nums">
                       {adjustedRate.toFixed(3)}%
                     </span>
                   </div>
-                  <div className="flex items-center gap-3 mb-6">
+                  <div className="flex flex-wrap items-center gap-2 mb-6">
                     <p className="text-white/50 text-sm">
                       APR {hasValidLoan ? `${aprPct.toFixed(3)}%` : "—"} · {tier.rates[productIndex].product}
                     </p>
@@ -329,7 +329,7 @@ export default function PricingCalculator() {
                     <div className="border-t border-white/10 pt-3">
                       <div className="flex items-center justify-between">
                         <span className="text-white/80 text-sm font-medium">Est. Monthly P&I</span>
-                        <span className="text-white font-bold text-2xl tabular-nums">
+                        <span className="text-white font-bold text-xl sm:text-2xl tabular-nums">
                           {hasValidLoan ? `${fmt$(monthlyPayment, 2)}/mo` : "—"}
                         </span>
                       </div>
@@ -344,7 +344,7 @@ export default function PricingCalculator() {
                 <div className="bg-white border border-border p-5 sm:p-6" style={{ borderRadius: "3px" }}>
                   <p className="section-label text-muted mb-4">Estimated Lender Fees</p>
                   <div className="space-y-2.5">
-                    <div className="flex items-center justify-between text-sm gap-4">
+                    <div className="flex items-start justify-between text-sm gap-4">
                       <span className="text-muted">
                         {originationIsFlat
                           ? "Origination (minimum)"

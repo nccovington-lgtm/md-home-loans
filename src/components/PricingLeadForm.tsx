@@ -101,7 +101,7 @@ export default function PricingLeadForm({ pricer }: { pricer: PricerSnapshot }) 
 
   if (status === "success") {
     return (
-      <div className="bg-white p-8 sm:p-12 text-center" style={{ borderRadius: "3px" }}>
+      <div className="bg-white p-6 sm:p-10 text-center" style={{ borderRadius: "3px" }}>
         {/* Icon */}
         <div className="relative w-16 h-16 mx-auto mb-6">
           <div className="absolute inset-0 bg-teal/10 rounded-full" />
@@ -202,7 +202,7 @@ export default function PricingLeadForm({ pricer }: { pricer: PricerSnapshot }) 
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 py-3 border-y border-border">
+      <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6 py-3 border-y border-border">
         {[
           { icon: "🔒", text: "Secure & Private" },
           { icon: "✓", text: "No Hard Credit Pull" },
