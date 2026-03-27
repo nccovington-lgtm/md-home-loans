@@ -29,7 +29,7 @@ export interface FicoTier {
 
 export const ratesConfig = {
   // ← Update this date every time rates change
-  lastUpdated: "March 18, 2026",
+  lastUpdated: "March 26, 2026",
 
   fees: {
     originationUnder1p5m: 0.01,   // 1.000% — loans ≤ $1,500,000
@@ -65,9 +65,9 @@ export const ratesConfig = {
       ltvRange: "Up to 100% LTV",
       isFeatured: true,
       rates: [
-        { product: "30-Year Fixed", rate: "7.250" },
-        { product: "15-Year Fixed", rate: "7.000" },
-        { product: "7/6 ARM",       rate: "7.125" },
+        { product: "30-Year Fixed", rate: "7.625" },
+        { product: "15-Year Fixed", rate: "7.250" },
+        { product: "7/6 ARM",       rate: "7.000" },
         { product: "5/6 ARM",       rate: "7.000" },
       ],
     },
@@ -76,9 +76,9 @@ export const ratesConfig = {
       ltvRange: "95% LTV",
       isFeatured: false,
       rates: [
-        { product: "30-Year Fixed", rate: "7.125" },
-        { product: "15-Year Fixed", rate: "6.875" },
-        { product: "7/6 ARM",       rate: "7.000" },
+        { product: "30-Year Fixed", rate: "7.500" },
+        { product: "15-Year Fixed", rate: "7.125" },
+        { product: "7/6 ARM",       rate: "6.875" },
         { product: "5/6 ARM",       rate: "6.875" },
       ],
     },
@@ -87,9 +87,9 @@ export const ratesConfig = {
       ltvRange: "90% LTV",
       isFeatured: false,
       rates: [
-        { product: "30-Year Fixed", rate: "7.000" },
-        { product: "15-Year Fixed", rate: "6.750" },
-        { product: "7/6 ARM",       rate: "6.875" },
+        { product: "30-Year Fixed", rate: "7.375" },
+        { product: "15-Year Fixed", rate: "7.000" },
+        { product: "7/6 ARM",       rate: "6.750" },
         { product: "5/6 ARM",       rate: "6.750" },
       ],
     },
