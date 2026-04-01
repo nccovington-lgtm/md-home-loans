@@ -18,7 +18,7 @@ interface RatesData {
   tiers: DownTier[];
 }
 
-// ── Excel Parser ─────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const PRODUCT_MAP: Record<string, string> = {
   JF30: "30-Year Fixed",
@@ -29,6 +29,8 @@ const PRODUCT_MAP: Record<string, string> = {
 };
 
 const PRODUCTS_IN_ORDER = ["30-Year Fixed", "15-Year Fixed", "7/6 ARM", "5/6 ARM"];
+
+// ── Excel Parser ──────────────────────────────────────────────────────────────
 
 async function parseExcel(file: File): Promise<{ detected: Record<string, string>; errors: string[] }> {
   const XLSX = await import("xlsx");
@@ -55,7 +57,6 @@ async function parseExcel(file: File): Promise<{ detected: Record<string, string
       const row = rows[i];
       if (!row) continue;
 
-      // Check for product identifier row
       for (const cell of row) {
         if (typeof cell === "string") {
           const upper = cell.trim().toUpperCase();
@@ -73,7 +74,6 @@ async function parseExcel(file: File): Promise<{ detected: Record<string, string
 
       if (!currentProduct) continue;
 
-      // Check for header row (contains "Rate" and some lock period)
       const strCells = row.map((c) => (typeof c === "string" ? c.toLowerCase() : ""));
       const hasRate = strCells.some((c) => c.includes("rate"));
       const has30Day = strCells.some((c) => c.includes("30"));
@@ -85,13 +85,11 @@ async function parseExcel(file: File): Promise<{ detected: Record<string, string
         continue;
       }
 
-      // Parse data rows
       if (inTable && rateCol >= 0 && lock30Col >= 0) {
         const rateVal = row[rateCol];
         const lock30Val = row[lock30Col];
 
         if (rateVal === null || rateVal === undefined || rateVal === "") {
-          // blank row — end of this table
           inTable = false;
           continue;
         }
@@ -101,11 +99,8 @@ async function parseExcel(file: File): Promise<{ detected: Record<string, string
 
         if (isNaN(rateNum) || isNaN(priceNum)) continue;
 
-        // Track row with price closest to 0 (par)
         const existing = detected[currentProduct];
-        const existingPrice = existing
-          ? parseFloat(existing.split("|")[1])
-          : Infinity;
+        const existingPrice = existing ? parseFloat(existing.split("|")[1]) : Infinity;
 
         if (Math.abs(priceNum) < Math.abs(existingPrice)) {
           detected[currentProduct] = `${rateNum}|${priceNum}`;
@@ -114,29 +109,171 @@ async function parseExcel(file: File): Promise<{ detected: Record<string, string
     }
   }
 
-  // Convert to clean rate strings
-  const result: Record<string, string> = {};
-  for (const [product, raw] of Object.entries(detected)) {
-    const rateNum = parseFloat(raw.split("|")[0]);
-    // Round to nearest 0.125
-    const rounded = Math.round(rateNum * 8) / 8;
-    result[product] = rounded.toFixed(3);
+  if (Object.keys(detected).length === 0) {
+    errors.push("Could not detect Titan MD rate tables. Make sure you uploaded the Orion Non-Agency rate sheet.");
   }
 
-  if (Object.keys(result).length === 0) {
-    errors.push("Could not detect Titan MD rate tables. Check that you uploaded the correct Orion Non-Agency rate sheet.");
-  }
-
-  return { detected: result, errors };
+  return { detected: toCleanRates(detected), errors };
 }
 
-// ── Build RatesData from detected par rates ───────────────────────────────────
+// ── PDF Parser ────────────────────────────────────────────────────────────────
+
+interface TextItem {
+  text: string;
+  x: number;
+  y: number;
+}
+
+async function parsePDF(file: File): Promise<{ detected: Record<string, string>; errors: string[] }> {
+  // Dynamic import to keep pdfjs out of initial bundle
+  const pdfjsLib = await import("pdfjs-dist");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+
+  // Find the Titan MD page(s)
+  const titanPages: number[] = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const fullText = content.items
+      .map((item) => ("str" in item ? item.str : ""))
+      .join(" ")
+      .toLowerCase();
+    if (fullText.includes("titan md") || fullText.includes("titanmd")) {
+      titanPages.push(p);
+    }
+  }
+
+  if (titanPages.length === 0) {
+    return {
+      detected: {},
+      errors: ['Could not find "Titan MD" in this PDF. Make sure you uploaded the Orion Non-Agency rate sheet.'],
+    };
+  }
+
+  const detected: Record<string, string> = {};
+
+  for (const pageNum of titanPages) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+
+    // Extract positioned text items
+    const items: TextItem[] = content.items
+      .filter((item) => "str" in item && (item as { str: string }).str.trim())
+      .map((item) => {
+        const i = item as { str: string; transform: number[] };
+        return { text: i.str.trim(), x: i.transform[4], y: i.transform[5] };
+      })
+      .filter((i) => i.text.length > 0);
+
+    // Group into rows by y-coordinate (within 3pt tolerance)
+    const rows: TextItem[][] = [];
+    for (const item of items) {
+      const existing = rows.find((row) => Math.abs(row[0].y - item.y) < 3);
+      if (existing) {
+        existing.push(item);
+        existing.sort((a, b) => a.x - b.x);
+      } else {
+        rows.push([item]);
+      }
+    }
+    // Sort rows top-to-bottom (higher y = higher on page in PDF coords)
+    rows.sort((a, b) => b[0].y - a[0].y);
+
+    // Walk rows to find product tables
+    let currentProduct: string | null = null;
+    let lock30ColX = -1;
+    let rateColX = -1;
+    let inTable = false;
+
+    for (const row of rows) {
+      const rowText = row.map((i) => i.text).join(" ").toUpperCase();
+
+      // Check for product code
+      for (const [code, name] of Object.entries(PRODUCT_MAP)) {
+        if (rowText.includes(code.toUpperCase())) {
+          currentProduct = name;
+          inTable = false;
+          lock30ColX = -1;
+          rateColX = -1;
+          break;
+        }
+      }
+
+      if (!currentProduct) continue;
+
+      // Check for header row
+      const hasRate = row.some((i) => i.text.toLowerCase() === "rate");
+      const has30 = row.some((i) => i.text.includes("30"));
+
+      if (hasRate && has30 && !inTable) {
+        const rateItem = row.find((i) => i.text.toLowerCase() === "rate");
+        const lock30Item = row.find((i) => i.text.includes("30"));
+        if (rateItem) rateColX = rateItem.x;
+        if (lock30Item) lock30ColX = lock30Item.x;
+        inTable = true;
+        continue;
+      }
+
+      if (inTable && rateColX >= 0 && lock30ColX >= 0) {
+        // Find cells near the rate and 30-day columns (within 20pt)
+        const rateCell = row.find((i) => Math.abs(i.x - rateColX) < 20);
+        const lock30Cell = row.find((i) => Math.abs(i.x - lock30ColX) < 20);
+
+        if (!rateCell) {
+          inTable = false;
+          continue;
+        }
+
+        const rateNum = parseFloat(rateCell.text);
+        const priceNum = lock30Cell ? parseFloat(lock30Cell.text) : NaN;
+
+        if (isNaN(rateNum)) {
+          inTable = false;
+          continue;
+        }
+
+        if (!isNaN(priceNum)) {
+          const existing = detected[currentProduct];
+          const existingPrice = existing ? parseFloat(existing.split("|")[1]) : Infinity;
+          if (Math.abs(priceNum) < Math.abs(existingPrice)) {
+            detected[currentProduct] = `${rateNum}|${priceNum}`;
+          }
+        }
+      }
+    }
+  }
+
+  if (Object.keys(detected).length === 0) {
+    return {
+      detected: {},
+      errors: [
+        "Found the Titan MD section but could not parse rate tables. The PDF layout may be different than expected — try uploading an Excel version instead.",
+      ],
+    };
+  }
+
+  return { detected: toCleanRates(detected), errors: [] };
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+function toCleanRates(raw: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [product, val] of Object.entries(raw)) {
+    const rateNum = parseFloat(val.split("|")[0]);
+    result[product] = (Math.round(rateNum * 8) / 8).toFixed(3);
+  }
+  return result;
+}
 
 function buildRatesFromDetected(detected: Record<string, string>, existing: RatesData): RatesData {
-  // detected gives us par rates (0% down / highest LTV tier)
-  // Lower LTV tiers get -0.125% per tier
   const today = new Date();
-  const lastUpdated = today.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const lastUpdated = today.toLocaleDateString("en-US", {
+    month: "long", day: "numeric", year: "numeric",
+  });
 
   const baseRates = PRODUCTS_IN_ORDER.map((product) => ({
     product,
@@ -144,22 +281,13 @@ function buildRatesFromDetected(detected: Record<string, string>, existing: Rate
   }));
 
   const tiers: DownTier[] = [
+    { label: "0% Down", ltvRange: "Up to 100% LTV", isFeatured: true, rates: baseRates },
     {
-      label: "0% Down",
-      ltvRange: "Up to 100% LTV",
-      isFeatured: true,
-      rates: baseRates,
-    },
-    {
-      label: "5% Down",
-      ltvRange: "95% LTV",
-      isFeatured: false,
+      label: "5% Down", ltvRange: "95% LTV", isFeatured: false,
       rates: baseRates.map((r) => ({ ...r, rate: (parseFloat(r.rate) - 0.125).toFixed(3) })),
     },
     {
-      label: "10% Down",
-      ltvRange: "90% LTV",
-      isFeatured: false,
+      label: "10% Down", ltvRange: "90% LTV", isFeatured: false,
       rates: baseRates.map((r) => ({ ...r, rate: (parseFloat(r.rate) - 0.25).toFixed(3) })),
     },
   ];
@@ -167,7 +295,13 @@ function buildRatesFromDetected(detected: Record<string, string>, existing: Rate
   return { ...existing, lastUpdated, tiers };
 }
 
-// ── Step components ───────────────────────────────────────────────────────────
+async function parseFile(file: File): Promise<{ detected: Record<string, string>; errors: string[] }> {
+  if (file.name.endsWith(".pdf")) return parsePDF(file);
+  if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) return parseExcel(file);
+  return { detected: {}, errors: ["Unsupported file type. Upload a PDF or Excel file."] };
+}
+
+// ── Login Step ────────────────────────────────────────────────────────────────
 
 function LoginStep({ onLogin }: { onLogin: (pw: string) => void }) {
   const [pw, setPw] = useState("");
@@ -184,11 +318,7 @@ function LoginStep({ onLogin }: { onLogin: (pw: string) => void }) {
       body: JSON.stringify({ password: pw }),
     });
     setLoading(false);
-    if (res.ok) {
-      onLogin(pw);
-    } else {
-      setError("Incorrect password.");
-    }
+    if (res.ok) { onLogin(pw); } else { setError("Incorrect password."); }
   }
 
   return (
@@ -226,6 +356,8 @@ function LoginStep({ onLogin }: { onLogin: (pw: string) => void }) {
   );
 }
 
+// ── Upload Step ───────────────────────────────────────────────────────────────
+
 function UploadStep({
   onRates,
   onManual,
@@ -235,19 +367,18 @@ function UploadStep({
 }) {
   const [dragging, setDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [parseStatus, setParseStatus] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback(
     async (file: File) => {
-      if (!file.name.endsWith(".xlsx") && !file.name.endsWith(".xls")) {
-        setErrors(["Please upload an Excel file (.xlsx or .xls)"]);
-        return;
-      }
       setParsing(true);
       setErrors([]);
-      const { detected, errors: parseErrors } = await parseExcel(file);
+      setParseStatus(file.name.endsWith(".pdf") ? "Reading PDF and searching for Titan MD section…" : "Parsing rate sheet…");
+      const { detected, errors: parseErrors } = await parseFile(file);
       setParsing(false);
+      setParseStatus("");
       if (parseErrors.length > 0) {
         setErrors(parseErrors);
         return;
@@ -269,7 +400,7 @@ function UploadStep({
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-lg space-y-4">
           <div
-            className={`border-2 border-dashed rounded p-12 text-center cursor-pointer transition-colors ${
+            className={`border-2 border-dashed p-12 text-center cursor-pointer transition-colors ${
               dragging ? "border-teal bg-teal/5" : "border-border hover:border-navy/40"
             }`}
             style={{ borderRadius: "3px" }}
@@ -278,26 +409,30 @@ function UploadStep({
             onDrop={(e) => {
               e.preventDefault();
               setDragging(false);
-              const file = e.dataTransfer.files[0];
-              if (file) handleFile(file);
+              const f = e.dataTransfer.files[0];
+              if (f) handleFile(f);
             }}
             onClick={() => inputRef.current?.click()}
           >
             <input
               ref={inputRef}
               type="file"
-              accept=".xlsx,.xls"
+              accept=".pdf,.xlsx,.xls"
               className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
             />
-            <div className="text-4xl mb-4">📊</div>
+            <div className="text-4xl mb-4">{parsing ? "⏳" : "📄"}</div>
             {parsing ? (
-              <p className="text-text font-medium">Parsing rate sheet…</p>
+              <>
+                <p className="text-text font-medium">{parseStatus}</p>
+                <p className="text-muted text-sm mt-1">This may take a few seconds for large PDFs…</p>
+              </>
             ) : (
               <>
-                <p className="text-text font-medium mb-1">Drop Excel file here</p>
-                <p className="text-muted text-sm">Orion Non-Agency rate sheet, Page 10 (Titan MD)</p>
-                <p className="text-muted text-xs mt-3">.xlsx or .xls</p>
+                <p className="text-text font-medium mb-1">Drop rate sheet here</p>
+                <p className="text-muted text-sm">Orion Non-Agency rate sheet — full PDF or Excel</p>
+                <p className="text-muted text-xs mt-1">Automatically finds the Titan MD section</p>
+                <p className="text-muted text-xs mt-3">.pdf · .xlsx · .xls</p>
               </>
             )}
           </div>
@@ -319,16 +454,20 @@ function UploadStep({
   );
 }
 
+// ── Edit Step ─────────────────────────────────────────────────────────────────
+
 function RateInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-28 border border-border px-2 py-1.5 text-sm text-right tabular-nums font-mono focus:outline-none focus:border-navy"
-      style={{ borderRadius: "2px" }}
-      placeholder="0.000"
-    />
+    <div className="flex items-center justify-end gap-1">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-24 border border-border px-2 py-1.5 text-sm text-right tabular-nums font-mono focus:outline-none focus:border-navy"
+        style={{ borderRadius: "2px" }}
+      />
+      <span className="text-muted text-sm">%</span>
+    </div>
   );
 }
 
@@ -344,11 +483,11 @@ function EditStep({
   const [status, setStatus] = useState<"idle" | "publishing" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
 
-  function setRate(tierIdx: number, prodIdx: number, val: string) {
+  function setRate(tierIdx: number, rateIdx: number, val: string) {
     const newTiers = rates.tiers.map((t, ti) => ({
       ...t,
       rates: t.rates.map((r, ri) =>
-        ti === tierIdx && ri === prodIdx ? { ...r, rate: val } : r
+        ti === tierIdx && ri === rateIdx ? { ...r, rate: val } : r
       ),
     }));
     onChange({ ...rates, tiers: newTiers });
@@ -370,7 +509,7 @@ function EditStep({
     });
     if (res.ok) {
       setStatus("success");
-      setMessage("Rates published. Vercel will redeploy in ~30 seconds.");
+      setMessage("Published. Vercel will redeploy in ~30 seconds.");
     } else {
       const { error } = await res.json();
       setStatus("error");
@@ -384,15 +523,11 @@ function EditStep({
         <div className="flex items-center gap-3">
           <span className="text-teal text-xs font-semibold tracking-widest uppercase">Rate Admin</span>
           <span className="text-white/30">·</span>
-          <span className="text-white/60 text-sm">Edit & Publish</span>
+          <span className="text-white/60 text-sm">Review & Publish</span>
         </div>
         <div className="flex items-center gap-3">
-          {status === "success" && (
-            <span className="text-teal text-sm font-medium">{message}</span>
-          )}
-          {status === "error" && (
-            <span className="text-red-400 text-sm">{message}</span>
-          )}
+          {status === "success" && <span className="text-teal text-sm font-medium">{message}</span>}
+          {status === "error" && <span className="text-red-400 text-sm">{message}</span>}
           <button
             onClick={publish}
             disabled={status === "publishing" || status === "success"}
@@ -425,39 +560,29 @@ function EditStep({
         {/* Rate Tiers */}
         <div className="bg-white border border-border p-6" style={{ borderRadius: "3px" }}>
           <h2 className="text-text font-semibold text-sm mb-1 uppercase tracking-wide">Rate Tiers</h2>
-          <p className="text-muted text-xs mb-5">Base rates for 760+ FICO, 30-day lock.</p>
-
+          <p className="text-muted text-xs mb-5">Base rates for 760+ FICO, 30-day lock. Verify against your rate sheet before publishing.</p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
                   <th className="text-left text-muted font-medium pb-2 pr-4">Product</th>
                   {rates.tiers.map((t) => (
-                    <th key={t.label} className="text-right text-muted font-medium pb-2 px-3">
-                      {t.label}
-                    </th>
+                    <th key={t.label} className="text-right text-muted font-medium pb-2 px-3">{t.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {PRODUCTS_IN_ORDER.map((product, prodIdx) => (
+                {PRODUCTS_IN_ORDER.map((product) => (
                   <tr key={product}>
                     <td className="py-3 pr-4 text-text font-medium whitespace-nowrap">{product}</td>
                     {rates.tiers.map((tier, tierIdx) => {
                       const rateIdx = tier.rates.findIndex((r) => r.product === product);
                       return (
                         <td key={tier.label} className="py-3 px-3 text-right">
-                          {rateIdx >= 0 ? (
-                            <div className="flex items-center justify-end gap-1">
-                              <RateInput
-                                value={tier.rates[rateIdx].rate}
-                                onChange={(v) => setRate(tierIdx, rateIdx, v)}
-                              />
-                              <span className="text-muted text-sm">%</span>
-                            </div>
-                          ) : (
-                            <span className="text-muted">—</span>
-                          )}
+                          {rateIdx >= 0
+                            ? <RateInput value={tier.rates[rateIdx].rate} onChange={(v) => setRate(tierIdx, rateIdx, v)} />
+                            : <span className="text-muted">—</span>
+                          }
                         </td>
                       );
                     })}
@@ -472,65 +597,37 @@ function EditStep({
         <div className="bg-white border border-border p-6" style={{ borderRadius: "3px" }}>
           <h2 className="text-text font-semibold text-sm mb-5 uppercase tracking-wide">Lender Fees</h2>
           <div className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-text text-sm font-medium">Origination — Loans ≤ $1,500,000</p>
-                <p className="text-muted text-xs">As a decimal (e.g. 0.01 = 1.000%)</p>
+            {[
+              { label: "Origination — Loans ≤ $1,500,000", sub: "e.g. 0.01 = 1.000%", key: "originationUnder1p5m" as const, pct: true },
+              { label: "Origination — Loans > $1,500,000", sub: "e.g. 0.0075 = 0.750%", key: "originationOver1p5m" as const, pct: true },
+              { label: "Underwriting Fee", sub: "Flat dollar amount", key: "underwriting" as const, pct: false },
+            ].map(({ label, sub, key, pct }) => (
+              <div key={key} className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-text text-sm font-medium">{label}</p>
+                  <p className="text-muted text-xs">{sub}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!pct && <span className="text-muted text-sm">$</span>}
+                  <input
+                    type="number"
+                    step={pct ? "0.0001" : "1"}
+                    value={rates.fees[key]}
+                    onChange={(e) => setFee(key, e.target.value)}
+                    className="w-28 border border-border px-3 py-2 text-sm text-right tabular-nums font-mono focus:outline-none focus:border-navy"
+                    style={{ borderRadius: "2px" }}
+                  />
+                  {pct && (
+                    <span className="text-muted text-xs w-20">
+                      = {(rates.fees[key] as number * 100).toFixed(3)}%
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.0001"
-                  value={rates.fees.originationUnder1p5m}
-                  onChange={(e) => setFee("originationUnder1p5m", e.target.value)}
-                  className="w-24 border border-border px-3 py-2 text-sm text-right tabular-nums font-mono focus:outline-none focus:border-navy"
-                  style={{ borderRadius: "2px" }}
-                />
-                <span className="text-muted text-xs w-20">
-                  = {(rates.fees.originationUnder1p5m * 100).toFixed(3)}%
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-text text-sm font-medium">Origination — Loans &gt; $1,500,000</p>
-                <p className="text-muted text-xs">As a decimal (e.g. 0.0075 = 0.750%)</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.0001"
-                  value={rates.fees.originationOver1p5m}
-                  onChange={(e) => setFee("originationOver1p5m", e.target.value)}
-                  className="w-24 border border-border px-3 py-2 text-sm text-right tabular-nums font-mono focus:outline-none focus:border-navy"
-                  style={{ borderRadius: "2px" }}
-                />
-                <span className="text-muted text-xs w-20">
-                  = {(rates.fees.originationOver1p5m * 100).toFixed(3)}%
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-text text-sm font-medium">Underwriting Fee</p>
-                <p className="text-muted text-xs">Flat dollar amount</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted text-sm">$</span>
-                <input
-                  type="number"
-                  step="1"
-                  value={rates.fees.underwriting}
-                  onChange={(e) => setFee("underwriting", e.target.value)}
-                  className="w-24 border border-border px-3 py-2 text-sm text-right tabular-nums font-mono focus:outline-none focus:border-navy"
-                  style={{ borderRadius: "2px" }}
-                />
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
-        {/* Publish footer CTA */}
         <div className="flex justify-end pb-8">
           <button
             onClick={publish}
@@ -546,7 +643,7 @@ function EditStep({
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
   const [step, setStep] = useState<"login" | "upload" | "edit">("login");
@@ -554,16 +651,8 @@ export default function AdminPage() {
   const [rates, setRates] = useState<RatesData>(ratesConfig as unknown as RatesData);
 
   if (step === "login") {
-    return (
-      <LoginStep
-        onLogin={(pw) => {
-          setPassword(pw);
-          setStep("upload");
-        }}
-      />
-    );
+    return <LoginStep onLogin={(pw) => { setPassword(pw); setStep("upload"); }} />;
   }
-
   if (step === "upload") {
     return (
       <UploadStep
@@ -572,12 +661,5 @@ export default function AdminPage() {
       />
     );
   }
-
-  return (
-    <EditStep
-      rates={rates}
-      password={password}
-      onChange={setRates}
-    />
-  );
+  return <EditStep rates={rates} password={password} onChange={setRates} />;
 }
