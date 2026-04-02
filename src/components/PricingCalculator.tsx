@@ -42,12 +42,31 @@ function calcAPR(loanAmount: number, noteRatePct: number, termMonths: number, fe
   return ((lo + hi) / 2) * 12 * 100;
 }
 
-function getFicoAdj(fico: number): number {
+function getFicoAdj(fico: number, downIndex: number): number {
+  // Titan MD: FICO adjustments only apply at >90% LTV (0% and 5% down)
+  // The 10% down tier (≤90% LTV) has no FICO/LTV columns in the rate sheet
+  if (downIndex === 2) return 0;
   const tiers = [...ratesConfig.ficoTiers].sort((a, b) => b.minFico - a.minFico);
   for (const tier of tiers) {
     if (fico >= tier.minFico) return tier.adj;
   }
   return 0;
+}
+
+function getLoanAmtAdj(loanAmount: number, downIndex: number): number {
+  // Titan MD loan amount adjustments — source: Additional LLPA Adjustments, page 10
+  // Price points converted to rate % (1:1, same convention as FICO tiers)
+  // Only applies at high LTV (0% and 5% down); no adjustment for 10% down
+  if (downIndex === 2) return 0;
+  if (downIndex === 0) {
+    // 0% down (95.01–100% LTV)
+    if (loanAmount <= 1_000_000) return 0;
+    if (loanAmount <= 1_500_000) return 0.125;
+    return 0.250; // $1.5M–$2M max
+  }
+  // 5% down (90.01–95% LTV)
+  if (loanAmount <= 1_500_000) return 0;
+  return 0.125; // $1.5M–$2M
 }
 
 export default function PricingCalculator() {
@@ -79,8 +98,9 @@ export default function PricingCalculator() {
 
   const tier = tiers[downIndex];
   const baseRateNum = parseFloat(tier.rates[productIndex].rate);
-  const ficoAdj = getFicoAdj(ficoScore);
-  const adjustedRate = baseRateNum + ficoAdj;
+  const ficoAdj = getFicoAdj(ficoScore, downIndex);
+  const loanAmtAdj = getLoanAmtAdj(loanAmount, downIndex);
+  const adjustedRate = baseRateNum + ficoAdj + loanAmtAdj;
 
   const termMonths = tier.rates[productIndex].product.includes("15") ? 180 : 360;
   const monthlyRate = adjustedRate / 100 / 12;
