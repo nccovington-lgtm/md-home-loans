@@ -29,7 +29,7 @@ export interface FicoTier {
 
 export const ratesConfig = {
   // ← Update this date every time rates change
-  lastUpdated: "March 26, 2026",
+  lastUpdated: "April 2, 2026",
 
   fees: {
     originationUnder1p5m: 0.01,   // 1.000% — loans ≤ $1,500,000
@@ -53,11 +53,10 @@ export const ratesConfig = {
 
   // FHFA baseline conforming loan limit — update each November when FHFA announces new limit
   // 2026 limit announced Nov 2025: $832,750 (up from $806,500 in 2025)
-  conformingLimit: 832_750,
+  conformingLimit: 832750,
 
   // ── RATE TIERS ──────────────────────────────────────────────────────────────
   // Base rates for 760+ FICO, 30-day lock.
-  // PLACEHOLDER — confirm with your own margin calculations before sharing.
   // ────────────────────────────────────────────────────────────────────────────
   tiers: [
     {
@@ -67,8 +66,8 @@ export const ratesConfig = {
       rates: [
         { product: "30-Year Fixed", rate: "7.625" },
         { product: "15-Year Fixed", rate: "7.250" },
-        { product: "7/6 ARM",       rate: "7.000" },
-        { product: "5/6 ARM",       rate: "7.000" },
+        { product: "7/6 ARM", rate: "6.875" },
+        { product: "5/6 ARM", rate: "7.000" },
       ],
     },
     {
@@ -78,8 +77,8 @@ export const ratesConfig = {
       rates: [
         { product: "30-Year Fixed", rate: "7.500" },
         { product: "15-Year Fixed", rate: "7.125" },
-        { product: "7/6 ARM",       rate: "6.875" },
-        { product: "5/6 ARM",       rate: "6.875" },
+        { product: "7/6 ARM", rate: "6.750" },
+        { product: "5/6 ARM", rate: "6.875" },
       ],
     },
     {
@@ -89,9 +88,9 @@ export const ratesConfig = {
       rates: [
         { product: "30-Year Fixed", rate: "7.375" },
         { product: "15-Year Fixed", rate: "7.000" },
-        { product: "7/6 ARM",       rate: "6.750" },
-        { product: "5/6 ARM",       rate: "6.750" },
+        { product: "7/6 ARM", rate: "6.625" },
+        { product: "5/6 ARM", rate: "6.750" },
       ],
-    },
+    }
   ] as DownTier[],
 };
